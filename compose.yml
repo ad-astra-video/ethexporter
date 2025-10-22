@@ -1,6 +1,8 @@
 services:
   eth-bal-exporter:
     image: eth-bal-exporter:latest
+    build:
+      context: .
     ports:
       - 9015:9015
     volumes:
