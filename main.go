@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"context"
 	"fmt"
 	"github.com/ethereum/go-ethereum/common"
@@ -16,7 +15,6 @@ import (
 var (
 	allWatching []*Watching
 	port        string
-	updates     string
 	prefix      string
 	loadSeconds float64
 	totalLoaded int64
@@ -29,16 +27,12 @@ type Watching struct {
 	Balance string
 }
 
-//
-// Connect to geth server
 func ConnectionToGeth(url string) error {
 	var err error
 	eth, err = ethclient.Dial(url)
 	return err
 }
 
-//
-// Fetch ETH balance from Geth server
 func GetEthBalance(address string) *big.Float {
 	balance, err := eth.BalanceAt(context.TODO(), common.HexToAddress(address), nil)
 	if err != nil {
@@ -47,8 +41,6 @@ func GetEthBalance(address string) *big.Float {
 	return ToEther(balance)
 }
 
-//
-// Fetch ETH balance from Geth server
 func CurrentBlock() uint64 {
 	block, err := eth.BlockByNumber(context.TODO(), nil)
 	if err != nil {
@@ -58,17 +50,11 @@ func CurrentBlock() uint64 {
 	return block.NumberU64()
 }
 
-//
-// CONVERTS WEI TO ETH
 func ToEther(o *big.Int) *big.Float {
-	pul, int := big.NewFloat(0), big.NewFloat(0)
-	int.SetInt(o)
-	pul.Mul(big.NewFloat(0.000000000000000001), int)
-	return pul
+	val := new(big.Float).SetInt(o)
+	return new(big.Float).Mul(val, big.NewFloat(1e-18))
 }
 
-//
-// HTTP response handler for /metrics
 func MetricsHttp(w http.ResponseWriter, r *http.Request) {
 	var allOut []string
 	total := big.NewFloat(0)
@@ -76,7 +62,7 @@ func MetricsHttp(w http.ResponseWriter, r *http.Request) {
 		if v.Balance == "" {
 			v.Balance = "0"
 		}
-		bal := big.NewFloat(0)
+		bal := new(big.Float)
 		bal.SetString(v.Balance)
 		total.Add(total, bal)
 		allOut = append(allOut, fmt.Sprintf("%veth_balance{name=\"%v\",address=\"%v\"} %v", prefix, v.Name, v.Address, v.Balance))
@@ -88,29 +74,32 @@ func MetricsHttp(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintln(w, strings.Join(allOut, "\n"))
 }
 
-//
-// Open the addresses.txt file (name:address)
-func OpenAddresses(filename string) error {
-	file, err := os.Open(filename)
-	if err != nil {
-		return err
+// Parse addresses from ADDRESSES env variable (format: name:0xabc,name2:0xdef)
+func LoadAddressesFromEnv() error {
+	addressEnv := os.Getenv("ADDRESSES")
+	if addressEnv == "" {
+		return fmt.Errorf("ADDRESSES environment variable not set")
 	}
-	defer file.Close()
-	scanner := bufio.NewScanner(file)
-	for scanner.Scan() {
-		object := strings.Split(scanner.Text(), ":")
-		if common.IsHexAddress(object[1]) {
-			w := &Watching{
-				Name:    object[0],
-				Address: object[1],
-			}
-			allWatching = append(allWatching, w)
+
+	items := strings.Split(addressEnv, ",")
+	for _, item := range items {
+		parts := strings.Split(item, ":")
+		if len(parts) != 2 {
+			fmt.Printf("Skipping invalid address entry: %v\n", item)
+			continue
 		}
+		name, addr := parts[0], parts[1]
+		if !common.IsHexAddress(addr) {
+			fmt.Printf("Skipping invalid Ethereum address: %v\n", addr)
+			continue
+		}
+		allWatching = append(allWatching, &Watching{Name: name, Address: addr})
 	}
-	if err := scanner.Err(); err != nil {
-		return err
+
+	if len(allWatching) == 0 {
+		return fmt.Errorf("no valid addresses found in ADDRESSES")
 	}
-	return err
+	return nil
 }
 
 func main() {
@@ -118,13 +107,11 @@ func main() {
 	port = os.Getenv("PORT")
 	prefix = os.Getenv("PREFIX")
 
-	err := OpenAddresses("addresses.txt")
-	if err != nil {
+	if err := LoadAddressesFromEnv(); err != nil {
 		panic(err)
 	}
 
-	err = ConnectionToGeth(gethUrl)
-	if err != nil {
+	if err := ConnectionToGeth(gethUrl); err != nil {
 		panic(err)
 	}
 
@@ -138,16 +125,14 @@ func main() {
 				v.Balance = GetEthBalance(v.Address).String()
 				totalLoaded++
 			}
-			t2 := time.Now()
-			loadSeconds = t2.Sub(t1).Seconds()
-			fmt.Printf("Finished checking %v wallets in %0.0f seconds, sleeping for %v seconds.\n", len(allWatching), loadSeconds, 15)
+			loadSeconds = time.Since(t1).Seconds()
+			fmt.Printf("Finished checking %v wallets in %.0f seconds, sleeping for 15 seconds.\n", len(allWatching), loadSeconds)
 			time.Sleep(15 * time.Second)
 		}
 	}()
 
 	block := CurrentBlock()
-
-	fmt.Printf("ETHexporter has started on port %v using Geth server: %v at block #%v\n", port, gethUrl, block)
+	fmt.Printf("ETHexporter started on port %v using Geth: %v at block #%v\n", port, gethUrl, block)
 	http.HandleFunc("/metrics", MetricsHttp)
 	panic(http.ListenAndServe("0.0.0.0:"+port, nil))
 }
