@@ -9,7 +9,7 @@ RUN go mod tidy
 # Build binary
 RUN go build -o /go/bin/ethexporter .
 
-ENV GETH=https://mainnet.infura.io
+#ENV GETH=https://mainnet.infura.io
 ENV PORT=9015
 
 #COPY addresses.txt /app
