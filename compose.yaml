@@ -10,3 +10,6 @@ services:
       - ./addresses.txt:/app/addresses.txt
     environment:
       - GETH=${GETH}
+      - PORT=${PORT}
+      - PREFIX=${PREFIX}
+      - ADDRESSES=${ADDRESSES}
