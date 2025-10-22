@@ -6,3 +6,5 @@ services:
       context: .
     ports:
       - 9015:9015
+    volumes:
+      - ./addresses.txt:/app/addresses.txt
